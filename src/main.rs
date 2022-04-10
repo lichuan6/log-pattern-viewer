@@ -8,25 +8,88 @@ use log_pattern_viewer::{
     args::Args,
     error::Error,
     pattern::Pattern,
+    s3::{read_report_file_from_key, report_file_key},
     ui::draw,
 };
+use rusoto_core::request::HttpClient;
+use rusoto_credential::ProfileProvider;
+use rusoto_s3::S3Client;
 use std::{
     fs, io,
     sync::mpsc,
+    sync::mpsc::channel,
     thread,
     time::{Duration, Instant},
 };
+use tokio::runtime::Runtime;
 use tui::{backend::CrosstermBackend, Terminal};
+
+fn read_from_remote(args: &Args) -> anyhow::Result<Vec<Pattern>> {
+    let (tx, rx) = channel();
+
+    let profile = if args.profile.is_some() {
+        println!("Using profile: {}", args.profile.as_ref().unwrap());
+        ProfileProvider::with_default_credentials(args.profile.as_ref().unwrap())?
+    } else {
+        ProfileProvider::new()?
+    };
+    let region = args
+        .region
+        .as_ref()
+        .unwrap_or(&"cn-northwest-1".to_string())
+        .parse()?;
+    let s3 = S3Client::new_with(HttpClient::new()?, profile, region);
+
+    let rt = Runtime::new().unwrap();
+    let namespace = &args.namespace;
+    let app = &args.name;
+    let year = args.year;
+    let month = args.month;
+
+    if namespace.is_none() || app.is_none() || year.is_none() || month.is_none() {
+        return Err(anyhow::anyhow!("namespace, app, year, month must be set"));
+    }
+    let key = report_file_key(
+        namespace.as_ref().unwrap(),
+        app.as_ref().unwrap(),
+        year.unwrap(),
+        month.unwrap(),
+    );
+    rt.block_on(async {
+        // retrieve report file
+        match read_report_file_from_key(&s3, &key).await {
+            Ok(report) => {
+                tx.send(report).unwrap();
+            }
+            Err(_) => {
+                // send error to main thread
+                // TODO: handle s3 read error
+            }
+        }
+    });
+    println!("Receiving report {key} ...");
+    let reports = rx.recv().expect("Bad report format");
+    let mut patterns = read_report_from_str(&reports).expect("can fetch report");
+    patterns.sort_by(|a, b| b.count.cmp(&a.count));
+
+    Ok(patterns)
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let pattern_file = args.file;
+    let local_file = &args.from_local;
 
     enable_raw_mode().expect("can run in raw mode");
 
-    let patterns = read_report(&pattern_file).expect("can fetch report");
+    let patterns = if local_file.is_none() {
+        read_from_remote(&args)?
+    } else {
+        read_report_from_file(local_file.as_ref().unwrap())?
+    };
+
     let title = "Log Pattern Viewer";
     let mut app = App::new(title, patterns);
+    app.calculate_percent();
 
     let (tx, rx) = mpsc::channel();
     let tick_rate = Duration::from_millis(200);
@@ -89,24 +152,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 KeyCode::Down | KeyCode::Char('j') => match app.current_menu_item() {
                     MenuItem::Pattern => {
-                        if let Some(selected) = app.pattern_table_state.selected() {
-                            let amount_patterns = app.patterns.len();
-                            if selected >= amount_patterns - 1 {
-                                app.pattern_table_state.select(Some(0));
-                            } else {
-                                app.pattern_table_state.select(Some(selected + 1));
-                            }
-                        }
+                        app.handle_down_patterns();
                     }
                     MenuItem::Samples => {
-                        let current_amount_samples = app.current_amount_samples();
-                        if let Some(selected) = app.sample_table_state.selected() {
-                            if selected >= current_amount_samples - 1 {
-                                app.sample_table_state.select(Some(0));
-                            } else {
-                                app.sample_table_state.select(Some(selected + 1));
-                            }
-                        }
+                        app.handle_down_samples();
                     }
                     MenuItem::Details => {
                         app.scroll_down();
@@ -114,25 +163,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 KeyCode::Up | KeyCode::Char('k') => match app.current_menu_item() {
                     MenuItem::Pattern => {
-                        if let Some(selected) = app.pattern_table_state.selected() {
-                            let amount_patterns = app.patterns.len();
-                            if selected > 0 {
-                                app.pattern_table_state.select(Some(selected - 1));
-                            } else {
-                                app.pattern_table_state.select(Some(amount_patterns - 1));
-                            }
-                        }
+                        app.handle_up_patterns();
                     }
                     MenuItem::Samples => {
-                        let current_amount_samples = app.current_amount_samples();
-                        if let Some(selected) = app.sample_table_state.selected() {
-                            if selected > 0 {
-                                app.sample_table_state.select(Some(selected - 1));
-                            } else {
-                                app.sample_table_state
-                                    .select(Some(current_amount_samples - 1));
-                            }
-                        }
+                        app.handle_up_samples();
                     }
                     MenuItem::Details => {
                         app.scroll_up();
@@ -174,8 +208,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 //     home
 // }
 
-fn read_report(path: &str) -> Result<Vec<Pattern>, Error> {
+fn read_report_from_file(path: &str) -> Result<Vec<Pattern>, Error> {
     let db_content = fs::read_to_string(path)?;
-    let parsed: Vec<Pattern> = serde_json::from_str(&db_content)?;
+    let mut patterns = read_report_from_str(&db_content)?;
+    patterns.sort_by(|a, b| b.count.cmp(&a.count));
+    Ok(patterns)
+}
+
+fn read_report_from_str(content: &str) -> Result<Vec<Pattern>, Error> {
+    let parsed: Vec<Pattern> = serde_json::from_str(content)?;
     Ok(parsed)
 }

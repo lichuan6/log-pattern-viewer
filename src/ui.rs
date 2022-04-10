@@ -255,6 +255,7 @@ fn render_patterns<'a>(app: &App) -> (Table<'a>, Table<'a>) {
     for pattern in &app.patterns {
         let row = Row::new(vec![
             Cell::from(Span::raw(format!("{}", pattern.count))),
+            Cell::from(Span::raw(format!("{:.2}%", pattern.percent.unwrap_or(0.0)))),
             Cell::from(Span::raw(pattern.patterns.clone())),
         ]);
         patterns.push(row);
@@ -265,6 +266,10 @@ fn render_patterns<'a>(app: &App) -> (Table<'a>, Table<'a>) {
         .header(Row::new(vec![
             Cell::from(Span::styled(
                 "Count",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Cell::from(Span::styled(
+                "Percent",
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Cell::from(Span::styled(
@@ -280,7 +285,11 @@ fn render_patterns<'a>(app: &App) -> (Table<'a>, Table<'a>) {
                 .border_type(BorderType::Plain),
         )
         .highlight_style(selected_style)
-        .widths(&[Constraint::Percentage(10), Constraint::Percentage(90)]);
+        .widths(&[
+            Constraint::Percentage(8),
+            Constraint::Percentage(8),
+            Constraint::Percentage(84),
+        ]);
 
     let samples = app
         .patterns

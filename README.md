@@ -8,4 +8,4 @@ A log patterns viewer.
 
 # Usage
 
-    log-pattern-viewer -f samples/reports.json
+    log-pattern-viewer --from-local samples/reports.json

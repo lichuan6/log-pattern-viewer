@@ -92,6 +92,20 @@ impl<'a> App<'a> {
         self.tabs.next();
     }
 
+    pub fn calculate_percent(&mut self) {
+        // get total count from patterns
+        let mut total = 0;
+        for pattern in &self.patterns {
+            total += pattern.count;
+        }
+
+        // calculate percent
+        for pattern in self.patterns.iter_mut() {
+            let percent = (pattern.count as f32 / total as f32) * 100.0;
+            pattern.percent = Some(percent);
+        }
+    }
+
     pub fn on_left(&mut self) {
         self.tabs.previous();
     }
@@ -104,6 +118,48 @@ impl<'a> App<'a> {
         self.patterns[self.pattern_table_state.selected().unwrap()]
             .samples
             .len()
+    }
+
+    pub fn handle_down_patterns(&mut self) {
+        if let Some(selected) = self.pattern_table_state.selected() {
+            let amount_patterns = self.patterns.len();
+            if selected >= amount_patterns - 1 {
+                self.pattern_table_state.select(Some(0));
+            } else {
+                self.pattern_table_state.select(Some(selected + 1));
+            }
+        }
+    }
+    pub fn handle_down_samples(&mut self) {
+        let current_amount_samples = self.current_amount_samples();
+        if let Some(selected) = self.sample_table_state.selected() {
+            if selected >= current_amount_samples - 1 {
+                self.sample_table_state.select(Some(0));
+            } else {
+                self.sample_table_state.select(Some(selected + 1));
+            }
+        }
+    }
+    pub fn handle_up_patterns(&mut self) {
+        if let Some(selected) = self.pattern_table_state.selected() {
+            let amount_patterns = self.patterns.len();
+            if selected > 0 {
+                self.pattern_table_state.select(Some(selected - 1));
+            } else {
+                self.pattern_table_state.select(Some(amount_patterns - 1));
+            }
+        }
+    }
+    pub fn handle_up_samples(&mut self) {
+        let current_amount_samples = self.current_amount_samples();
+        if let Some(selected) = self.sample_table_state.selected() {
+            if selected > 0 {
+                self.sample_table_state.select(Some(selected - 1));
+            } else {
+                self.sample_table_state
+                    .select(Some(current_amount_samples - 1));
+            }
+        }
     }
 
     pub fn current_pattern(&self) -> &Pattern {

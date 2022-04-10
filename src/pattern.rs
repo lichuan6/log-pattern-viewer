@@ -7,6 +7,7 @@ pub struct Pattern {
     // patterns: Vec<String>,
     pub patterns: String,
     pub count: usize,
+    pub percent: Option<f32>,
     #[serde(deserialize_with = "deserialize_samples")]
     pub samples: Vec<Sample>,
 }
